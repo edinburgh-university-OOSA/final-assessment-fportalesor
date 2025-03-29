@@ -7,41 +7,45 @@ A class to handle geotiffs
 #######################################################
 # import necessary packages
 
-from pyproj import Proj, transform # package for reprojecting data
+from pyproj import Transformer # package for reprojecting data
 from osgeo import gdal             # package for handling geotiff data
 from osgeo import osr              # package for handling projection information
-#from gdal import Warp
 import numpy as np
-
+from processLVIS import lvisGround
 
 #######################################################
 
-class tiffHandle():
+class tiffHandle(lvisGround):
   '''
   Class to handle geotiff files
   '''
 
   ########################################
 
-  def __init__(self,filename):
+  def reprojectCoordinates(self, x, y, in_epsg=4326, out_epsg=3031):
     '''
-    Class initialiser
-    Does nothing as this is only an example
-
+    Reproject the coordinates from one EPSG to another
     '''
+    # Initialize the transformer for the given projections
+    transformer = Transformer.from_crs(in_epsg, out_epsg, always_xy=True)
 
+    # Perform the transformation (note the new API with .transform())
+    x_new, y_new = transformer.transform(x, y)
 
-  ########################################
+    return x_new, y_new
 
-  def writeTiff(self,data, x, y, res, filename="chm.tif",epsg=27700):
+  def writeTiff(self, data, x, y, res, filename="chm.tif",epsg=3031):
     '''
     Write a geotiff from a raster layer
     '''
+    # Reproject the coordinates from EPSG:4326 (lat/lon) to EPSG:3031 (Antarctic Polar Stereographic)
+    x_reprojected, y_reprojected = self.reprojectCoordinates(x, y, in_epsg=4326, out_epsg=epsg)
+    
     # determine bounds
-    minX=np.min(x)
-    maxX=np.max(x)
-    minY=np.min(y)
-    maxY=np.max(y)
+    minX=np.nanmin(x_reprojected) #nanmin and nanmax to avoid nans
+    maxX=np.nanmax(x_reprojected)
+    minY=np.nanmin(y_reprojected)
+    maxY=np.nanmax(y_reprojected)
 
     # determine image size
     nX=int((maxX-minX)/res+1)
@@ -51,8 +55,8 @@ class tiffHandle():
     imageArr=np.full((nY,nX),-999.0)
 
     # calculate the raster pixel index in x and y
-    xInds=np.array(np.floor((x-np.min(x))/res),dtype=int)   # need to force to int type
-    yInds=np.array(np.floor((np.max(y)-y)/res),dtype=int)
+    xInds=np.array(np.floor((x_reprojected -np.min(x_reprojected))/res),dtype=int)   # need to force to int type
+    yInds=np.array(np.floor((np.max(y_reprojected)-y_reprojected)/res),dtype=int)
 
     # this is a simple pack which will assign a single footprint to each pixel
     imageArr[yInds,xInds]=data
@@ -61,24 +65,24 @@ class tiffHandle():
     geotransform = (minX, res, 0, maxY, 0, -1*res)
 
     # load data in to geotiff object
-    dst_ds = gdal.GetDriverByName('GTiff').Create(filename, self.nX, self.nY, 1, gdal.GDT_Float32)
-
+    dst_ds = gdal.GetDriverByName('GTiff').Create(filename, nX, nY, 1, gdal.GDT_Float32)
     dst_ds.SetGeoTransform(geotransform)    # specify coords
+
     srs = osr.SpatialReference()            # establish encoding
     srs.ImportFromEPSG(epsg)                # WGS84 lat/long
     dst_ds.SetProjection(srs.ExportToWkt()) # export coords to file
+
     dst_ds.GetRasterBand(1).WriteArray(imageArr)  # write image to the raster
     dst_ds.GetRasterBand(1).SetNoDataValue(-999)  # set no data value
     dst_ds.FlushCache()                     # write to disk
     dst_ds = None
 
     print("Image written to",filename)
-    return
 
 
   ########################################
 
-  def readTiff(self,filename):
+def readTiff(self,filename):
     '''
     Read a geotiff in to RAM
     '''
