@@ -7,8 +7,7 @@ Some example functions for processing LVIS data
 
 import numpy as np
 from lvisClass import lvisData
-from pyproj import Proj, transform
-from scipy.ndimage.filters import gaussian_filter1d 
+from scipy.ndimage.filters import gaussian_filter1d
 
 
 #######################################
@@ -58,26 +57,11 @@ class lvisGround(lvisData):
     # allocate space for ground elevation
     self.zG=np.full(self.nWaves,-999.9)  # no data flag for now
 
-    from sys import exit
-    print("CofG function not finished. Use online resources or week 4 code to finish")
-    exit()   # leave the program as this method is incomplete
-
-
-  #######################################################
-
-  def reproject(self,inEPSG,outEPSG):
-    '''
-    Reproject footprint coordinates
-    '''
-    # set projections
-    inProj=Proj("epsg:"+str(inEPSG))
-    outProj=Proj("epsg:"+str(outEPSG))
-    # reproject data
-    x,y=transform(inProj,outProj,self.lon,self.lat)
-    self.lon=x
-    self.lat=y
-
-
+    # loop over waveforms
+    for i in range(0,self.nWaves):
+      if(np.sum(self.denoised[i])>0.0):   # avoid empty waveforms (clouds etc)
+        self.zG[i]=np.average(self.z[i],weights=self.denoised[i])  # centre of gravity
+  
   ##############################################
 
   def findStats(self,statsLen=10):
