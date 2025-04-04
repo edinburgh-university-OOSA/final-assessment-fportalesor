@@ -137,12 +137,13 @@ class tiffHandle(lvisGround):
 
   def create_mosaic(self, section_files, final_output):
     '''
-    Fast mosaic creation with memory limit
-    
+    Creates a GeoTIFF mosaic from multiple input files using GDAL.
+    Uses memory-efficient VRT processing and cleans up temporary files.
+
     Args:
-        section_files (list): List of input TIFF file paths
-        final_output (str): Output file path for mosaic
-        
+        section_files: List of input GeoTIFF file paths (list[str])
+        final_output: Output file path for mosaic (str)
+
     Returns:
         bool: True if successful, False if failed
     '''
