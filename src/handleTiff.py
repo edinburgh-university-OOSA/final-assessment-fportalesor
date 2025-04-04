@@ -403,115 +403,6 @@ class tiffHandle(lvisGround):
     
     print(f"Successfully created final product: {processing_filename}")
     return True
-    
-  def calculate_volume_change(self, dem1_path, dem2_path, resample_method='bilinear'):
-    '''
-    Calculate volume change between two DEMs in their overlapping region
-    
-    Args:
-        dem1_path: Path to first DEM
-        dem2_path: Path to second DEM
-        resample_method: Resampling method ('nearest', 'bilinear', 'cubic')
-        
-    Returns:
-        tuple: (volume_change, stats) where stats contains:
-               {'min', 'max', 'mean', 'std', 'area', 'pixel_count'}
-    '''
-    # Open both datasets
-    self.readTiff(dem1_path)
-    dem1_info = {
-        'transform': (self.xOrigin, self.pixelWidth, 0, 
-                     self.yOrigin, 0, self.pixelHeight),
-        'projection': self.ds.GetProjection(),
-        'bounds': (
-            self.xOrigin,
-            self.yOrigin + self.pixelHeight * self.nY,
-            self.xOrigin + self.pixelWidth * self.nX,
-            self.yOrigin
-        ),
-        'size': (self.nX, self.nY)
-    }
-    
-    self.readTiff(dem2_path)
-    dem2_info = {
-        'transform': (self.xOrigin, self.pixelWidth, 0, 
-                     self.yOrigin, 0, self.pixelHeight),
-        'projection': self.ds.GetProjection(),
-        'bounds': (
-            self.xOrigin,
-            self.yOrigin + self.pixelHeight * self.nY,
-            self.xOrigin + self.pixelWidth * self.nX,
-            self.yOrigin
-        ),
-        'size': (self.nX, self.nY)
-    }
-
-    # Check if projections match
-    if dem1_info['projection'] != dem2_info['projection']:
-        raise ValueError("DEMs must have the same projection")
-
-    # Calculate overlapping area
-    overlap_bounds = (
-        max(dem1_info['bounds'][0], dem2_info['bounds'][0]),  # minx
-        max(dem1_info['bounds'][1], dem2_info['bounds'][1]),  # miny
-        min(dem1_info['bounds'][2], dem2_info['bounds'][2]),  # maxx
-        min(dem1_info['bounds'][3], dem2_info['bounds'][3])   # maxy
-    )
-
-    # Check for overlap
-    if overlap_bounds[0] >= overlap_bounds[2] or overlap_bounds[1] >= overlap_bounds[3]:
-        raise ValueError("DEMs do not have any overlapping area")
-
-    # Determine output resolution (use the finer resolution)
-    res_x = min(abs(dem1_info['transform'][1]), abs(dem2_info['transform'][1]))
-    res_y = min(abs(dem1_info['transform'][5]), abs(dem2_info['transform'][5]))
-
-    # Warp both DEMs to the same grid
-    warp_options = {
-        'format': 'MEM',
-        'outputBounds': overlap_bounds,
-        'xRes': res_x,
-        'yRes': res_y,
-        'targetAlignedPixels': True,
-        'resampleAlg': resample_method,
-        'dstNodata': -999
-    }
-
-    # Align both DEMs
-    dem1_aligned = gdal.Warp('', dem1_path, **warp_options)
-    dem2_aligned = gdal.Warp('', dem2_path, **warp_options)
-
-    # Get aligned arrays
-    arr1 = dem1_aligned.GetRasterBand(1).ReadAsArray()
-    arr2 = dem2_aligned.GetRasterBand(1).ReadAsArray()
-
-    # Calculate differences on valid pixels
-    valid_mask = (arr1 != -999) & (arr2 != -999)
-    diff = np.full_like(arr1, np.nan)
-    diff[valid_mask] = arr2[valid_mask] - arr1[valid_mask]
-
-    # Calculate statistics
-    pixel_area = res_x * res_y
-    volume_change = np.nansum(diff) * pixel_area
-
-    stats = {
-        'min': np.nanmin(diff),
-        'max': np.nanmax(diff),
-        'mean': np.nanmean(diff),
-        'std': np.nanstd(diff),
-        'area': np.sum(valid_mask) * pixel_area,
-        'pixel_count': np.sum(valid_mask),
-        'overlap_bounds': overlap_bounds,
-        'resolution': (res_x, res_y),
-        'aligned_dem1': dem1_aligned,
-        'aligned_dem2': dem2_aligned
-    }
-
-    # Clean up
-    del dem1_aligned, dem2_aligned
-    ds1 = ds2 = None
-
-    return volume_change, stats
   
     
   def create_difference_dem(self, dem1_path, dem2_path, output_path, resample_method='bilinear'):
@@ -610,7 +501,7 @@ class tiffHandle(lvisGround):
         'resolution': (res_x, res_y),
         'aligned_dem1': dem1_aligned,
         'aligned_dem2': dem2_aligned,
-        'difference_array': diff  # Store for potential export
+        'difference_array': diff
     }
     
     # Calculate difference
@@ -645,9 +536,6 @@ class tiffHandle(lvisGround):
         out_epsg=epsg,
         reproject=False
     )
-
-    # Clean up
-    stats['aligned_dem1'] = stats['aligned_dem2'] = None
     
     print(f"Created difference DEM in overlapping area: {output_path}")
 
