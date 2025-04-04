@@ -49,7 +49,7 @@ if __name__ == "__main__":
                 clean_sections=not args.keep_sections,
                 bbox=PIG_BBOX
             )
-            processor.process_all_sections()
+            #processor.process_all_sections()
         except Exception as e:
             print(f"Error processing {os.path.basename(h5_file)}: {str(e)}")
             continue
@@ -60,9 +60,12 @@ if __name__ == "__main__":
     filename = '/geos/netdata/oosa/assignment/lvis/2009/ILVIS1B_AQ2009_1020_R1408_058456.h5'
     tiffHandler = tiffHandle(filename)
     
+    # Define precise bbox for Pine Island Glacier (in EPSG:3031)
+    BBOX = (-1.620e6, -0.300e6, -1.570e6, -0.230e6)
+
     # Create combined mosaics
     print(f"\nProcessing year: {args.year}")
-    success = tiffHandler.create_combined_mosaic(year=args.year)
+    success = tiffHandler.create_combined_mosaic(year=args.year, bbox=BBOX)
         
     if success:
         print(f"Successfully processed year {args.year}")
