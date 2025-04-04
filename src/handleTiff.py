@@ -156,17 +156,17 @@ class tiffHandle(lvisGround):
         # Create temporary VRT file
         vrt_file = "temp_mosaic.vrt"
         
-        # Build VRT first (very fast operation)
+        # Build VRT first
         cmd_vrt = [
             'gdalbuildvrt',
             '-hidenodata',
-            '-vrtnodata', '-999',  # Using standard GDAL NoData value
+            '-vrtnodata', '-999',
             '-resolution', 'highest',
             '-r', 'nearest',
             vrt_file
         ] + section_files
         
-        # Convert VRT to final TIFF with memory limits
+        # Convert VRT to final TIFF
         cmd_translate = [
             'gdal_translate',
             '-of', 'GTiff',
@@ -257,7 +257,82 @@ class tiffHandle(lvisGround):
             os.remove(output_path)
         return False
 
-  def create_combined_mosaic(self, year=2015, max_distance=None, smoothing=None, create_filled=False):
+  def crop_tiff(self, input_path, output_path, bbox):
+    '''
+    Crop a TIFF file to the specified bounding box
+    
+    Args:
+        input_path (str): Path to input TIFF file
+        output_path (str): Path for output cropped TIFF
+        bbox (tuple): Bounding box coordinates (xmin, ymin, xmax, ymax)
+                      in the same CRS as the input TIFF
+                      
+    Returns:
+        bool: True if successful, False if failed
+    '''
+    try:
+        # Open input file
+        ds = gdal.Open(input_path)
+        if ds is None:
+            raise ValueError(f"Could not open {input_path}")
+            
+        # Get geotransform and projection
+        gt = ds.GetGeoTransform()
+        projection = ds.GetProjection()
+        
+        # Convert bbox to pixel coordinates
+        xmin, ymin, xmax, ymax = bbox
+        xoff = int((xmin - gt[0]) / gt[1])
+        yoff = int((ymax - gt[3]) / gt[5])
+        xsize = int((xmax - xmin) / gt[1])
+        ysize = int((ymin - ymax) / gt[5])
+        
+        # Validate bounds
+        xoff = max(0, xoff)
+        yoff = max(0, yoff)
+        xsize = min(ds.RasterXSize - xoff, xsize)
+        ysize = min(ds.RasterYSize - yoff, ysize)
+        
+        # Read the subset
+        data = ds.GetRasterBand(1).ReadAsArray(xoff, yoff, xsize, ysize)
+        
+        # Create output
+        driver = gdal.GetDriverByName('GTiff')
+        out_ds = driver.Create(
+            output_path,
+            xsize,
+            ysize,
+            1,
+            gdal.GDT_Float32,
+            options=['COMPRESS=LZW', 'TILED=YES']
+        )
+        
+        # Update geotransform
+        new_gt = (
+            gt[0] + xoff * gt[1],
+            gt[1],
+            gt[2],
+            gt[3] + yoff * gt[5],
+            gt[4],
+            gt[5]
+        )
+        
+        out_ds.SetGeoTransform(new_gt)
+        out_ds.SetProjection(projection)
+        out_ds.GetRasterBand(1).WriteArray(data)
+        out_ds.GetRasterBand(1).SetNoDataValue(-999)
+        out_ds.FlushCache()
+        out_ds = None
+        
+        print(f"Cropped TIFF saved to {output_path}")
+        return True
+        
+    except Exception as e:
+        print(f"Error cropping TIFF: {str(e)}")
+        return False
+    
+  def create_combined_mosaic(self, year=2015, max_distance=None, 
+                             smoothing=None, create_filled=False, bbox=None):
     '''
     Create a combined mosaic from all folders matching the year pattern
     
@@ -299,18 +374,34 @@ class tiffHandle(lvisGround):
     if not success:
         return False
     
+    # Determine which file will be processed (combined or filled)
+    processing_filename = output_filename
+    
+    # Step 4: Apply gap filling if requested
     if create_filled:
         # Apply defaults if parameters not specified
-        actual_max_dist = max_distance if max_distance is not None else 45
+        actual_max_dist = max_distance if max_distance is not None else 25
         actual_smoothing = smoothing if smoothing is not None else 3
         
         print(f"\nFilling gaps (distance: {actual_max_dist}, smoothing: {actual_smoothing})...")
-        return self.fill_gaps(output_filename, filled_filename, 
-                            actual_max_dist, actual_smoothing)
+        if not self.fill_gaps(output_filename, filled_filename, 
+                            actual_max_dist, actual_smoothing):
+            return False
+        processing_filename = filled_filename
     
-    else:
-        print(f"Successfully created mosaic: {output_filename}")
-        return True
+    # Step 5: Apply cropping if requested
+    if bbox is not None:
+        print("\nCropping mosaic to specified bounding box...")
+        temp_filename = os.path.join("processed_data", "temp_cropped.tif")
+        if not self.crop_tiff(processing_filename, temp_filename, bbox):
+            return False
+        
+        # Replace original with cropped version
+        os.replace(temp_filename, processing_filename)
+        print(f"Cropping applied to: {processing_filename}")
+    
+    print(f"Successfully created final product: {processing_filename}")
+    return True
     
   def calculate_volume_change(self, dem1_path, dem2_path, resample_method='bilinear'):
     """
