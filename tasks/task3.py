@@ -49,7 +49,7 @@ if __name__ == "__main__":
                 clean_sections=not args.keep_sections,
                 bbox=PIG_BBOX
             )
-            #processor.process_all_sections()
+            processor.process_all_sections()
         except Exception as e:
             print(f"Error processing {os.path.basename(h5_file)}: {str(e)}")
             continue
