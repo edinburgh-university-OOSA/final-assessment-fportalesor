@@ -46,7 +46,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Plot Peak Memory Usage distribution")
     
     parser.add_argument('-y', '--year', type=int, required=True,
-                      help="Path to first DEM (e.g., 2009 DEM)")
+                      help="year of analysis")
     return parser.parse_args()
 
 if __name__ == '__main__':
