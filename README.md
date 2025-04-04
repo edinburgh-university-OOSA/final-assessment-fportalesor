@@ -3,15 +3,13 @@ This repository contains Python tools for processing and analysing elevation dat
 
 The toolkit enables reading raw LVIS waveform data, processing it into raster digital elevation models (DEMs), and generating derived graphical products.
 
-## Task 1
-
+## Task 1: Plot an LVIS Waveform
 
 #### Example command
 
 Run from the **tasks** directory:
 
 ```
-cd tasks/
 python task1.py -f /geos/netdata/oosa/assignment/lvis/2009/ILVIS1B_AQ2009_1020_R1408_058456.h5
 ```
 Behaviour:
@@ -27,7 +25,6 @@ Behaviour:
 Example with index specified:
 
 ```
-cd tasks/
 python task1.py -f [FILEPATH] -i 15 # Directly plots waveform 15
 ```
 
@@ -36,7 +33,7 @@ python task1.py -f [FILEPATH] -i 15 # Directly plots waveform 15
 <img src="./plots/waveform_15.png" alt="Example LVIS Waveform" width="70%"/>
 
 
-## Task 2
+## Task 2: Create a DEM for a specific flight line
 
 #### Example command
 
@@ -44,7 +41,7 @@ python task1.py -f [FILEPATH] -i 15 # Directly plots waveform 15
 python task2.py -f /geos/netdata/oosa/assignment/lvis/2009/ILVIS1B_AQ2009_1020_R1408_058456.h5 -s 20 -r 30
 ```
 
-## Task 3
+## Task 3: Process an annual dataset
 
 #### Example command for 2009 data
 
@@ -69,7 +66,7 @@ python task3.py -y 2015 -s 20 -r 100
 
 <img src="./plots/DEM_combined_mosaic_2015.png" alt="Combined Mosaic 2015" width="70%"/>
 
-## Task 4
+## Task 4: Gap-filling
 
 #### Example command for 2009 data
 
@@ -83,7 +80,6 @@ python task4.py -y 2009
 python task4.py -y 2009 -md 30 -s 5
 ```
 
-For 2015 year data change the value in -y is needed
 
 #### Example outputs
 
@@ -94,3 +90,21 @@ For 2015 year data change the value in -y is needed
 - 2015
 
 <img src="./plots/DEM_filled_mosaic_2015.png" alt="Filled Mosaic 2015" width="70%"/>
+
+## Task 5: Estimate change in elevation
+
+#### Example command - Basic Usage
+
+```
+python task5.py -d1 processed_data/filled_mosaic_2009.tif -d2 processed_data/filled_mosaic_2015.tif
+```
+
+#### Example command - With custom output
+
+```
+python task5.py -d1 processed_data/filled_mosaic_2009.tif -d2 processed_data/filled_mosaic_2015.tif -o change_map.tif
+```
+
+#### Example output
+
+<img src="./plots/DEM_elevation_change.png" alt="Elevation Change (2009-2015)" width="70%"/>
