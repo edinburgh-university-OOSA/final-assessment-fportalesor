@@ -404,7 +404,7 @@ class tiffHandle(lvisGround):
     return True
     
   def calculate_volume_change(self, dem1_path, dem2_path, resample_method='bilinear'):
-    """
+    '''
     Calculate volume change between two DEMs in their overlapping region
     
     Args:
@@ -415,52 +415,55 @@ class tiffHandle(lvisGround):
     Returns:
         tuple: (volume_change, stats) where stats contains:
                {'min', 'max', 'mean', 'std', 'area', 'pixel_count'}
-    """
+    '''
     # Open both datasets
-    ds1 = gdal.Open(dem1_path)
-    ds2 = gdal.Open(dem2_path)
+    self.readTiff(dem1_path)
+    dem1_info = {
+        'transform': (self.xOrigin, self.pixelWidth, 0, 
+                     self.yOrigin, 0, self.pixelHeight),
+        'projection': self.ds.GetProjection(),
+        'bounds': (
+            self.xOrigin,
+            self.yOrigin + self.pixelHeight * self.nY,
+            self.xOrigin + self.pixelWidth * self.nX,
+            self.yOrigin
+        ),
+        'size': (self.nX, self.nY)
+    }
     
-    if not ds1 or not ds2:
-        raise ValueError("Could not open one or both DEM files")
-
-    # Get geographic information
-    def get_geo_info(ds):
-        transform = ds.GetGeoTransform()
-        x_size = ds.RasterXSize
-        y_size = ds.RasterYSize
-        minx = transform[0]
-        maxy = transform[3]
-        maxx = minx + transform[1] * x_size
-        miny = maxy + transform[5] * y_size
-        return {
-            'transform': transform,
-            'projection': ds.GetProjection(),
-            'bounds': (minx, miny, maxx, maxy),
-            'size': (x_size, y_size)
-        }
-
-    info1 = get_geo_info(ds1)
-    info2 = get_geo_info(ds2)
+    self.readTiff(dem2_path)
+    dem2_info = {
+        'transform': (self.xOrigin, self.pixelWidth, 0, 
+                     self.yOrigin, 0, self.pixelHeight),
+        'projection': self.ds.GetProjection(),
+        'bounds': (
+            self.xOrigin,
+            self.yOrigin + self.pixelHeight * self.nY,
+            self.xOrigin + self.pixelWidth * self.nX,
+            self.yOrigin
+        ),
+        'size': (self.nX, self.nY)
+    }
 
     # Check if projections match
-    if info1['projection'] != info2['projection']:
+    if dem1_info['projection'] != dem2_info['projection']:
         raise ValueError("DEMs must have the same projection")
 
     # Calculate overlapping area
     overlap_bounds = (
-        max(info1['bounds'][0], info2['bounds'][0]),  # minx
-        max(info1['bounds'][1], info2['bounds'][1]),  # miny
-        min(info1['bounds'][2], info2['bounds'][2]),  # maxx
-        min(info1['bounds'][3], info2['bounds'][3])   # maxy
+        max(dem1_info['bounds'][0], dem2_info['bounds'][0]),  # minx
+        max(dem1_info['bounds'][1], dem2_info['bounds'][1]),  # miny
+        min(dem1_info['bounds'][2], dem2_info['bounds'][2]),  # maxx
+        min(dem1_info['bounds'][3], dem2_info['bounds'][3])   # maxy
     )
 
-    # Check if there is actual overlap
+    # Check for overlap
     if overlap_bounds[0] >= overlap_bounds[2] or overlap_bounds[1] >= overlap_bounds[3]:
         raise ValueError("DEMs do not have any overlapping area")
 
     # Determine output resolution (use the finer resolution)
-    res_x = min(abs(info1['transform'][1]), abs(info2['transform'][1]))
-    res_y = min(abs(info1['transform'][5]), abs(info2['transform'][5]))
+    res_x = min(abs(dem1_info['transform'][1]), abs(dem2_info['transform'][1]))
+    res_y = min(abs(dem1_info['transform'][5]), abs(dem2_info['transform'][5]))
 
     # Warp both DEMs to the same grid
     warp_options = {
@@ -473,10 +476,11 @@ class tiffHandle(lvisGround):
         'dstNodata': -999
     }
 
-    dem1_aligned = gdal.Warp('', ds1, **warp_options)
-    dem2_aligned = gdal.Warp('', ds2, **warp_options)
+    # Align both DEMs
+    dem1_aligned = gdal.Warp('', dem1_path, **warp_options)
+    dem2_aligned = gdal.Warp('', dem2_path, **warp_options)
 
-    # Read the aligned arrays
+    # Get aligned arrays
     arr1 = dem1_aligned.GetRasterBand(1).ReadAsArray()
     arr2 = dem2_aligned.GetRasterBand(1).ReadAsArray()
 
@@ -497,7 +501,9 @@ class tiffHandle(lvisGround):
         'area': np.sum(valid_mask) * pixel_area,
         'pixel_count': np.sum(valid_mask),
         'overlap_bounds': overlap_bounds,
-        'resolution': (res_x, res_y)
+        'resolution': (res_x, res_y),
+        'aligned_dem1': dem1_aligned,
+        'aligned_dem2': dem2_aligned
     }
 
     # Clean up
@@ -505,9 +511,10 @@ class tiffHandle(lvisGround):
     ds1 = ds2 = None
 
     return volume_change, stats
+  
     
   def create_difference_dem(self, dem1_path, dem2_path, output_path, resample_method='bilinear'):
-    """
+    '''
     Create a difference DEM from two input DEMs in their overlapping area
     
     Args:
@@ -515,57 +522,48 @@ class tiffHandle(lvisGround):
         dem2_path: Path to second DEM
         output_path: Path for output difference DEM
         resample_method: Resampling method
-    """
-    # First calculate volume change to get alignment parameters
+    '''
+    # First calculate volume change to get alignment parameters and aligned DEMs
     _, stats = self.calculate_volume_change(dem1_path, dem2_path, resample_method)
     
-    # Warp both DEMs to the same grid
-    warp_options = {
-        'format': 'MEM',
-        'outputBounds': stats['overlap_bounds'],
-        'xRes': stats['resolution'][0],
-        'yRes': stats['resolution'][1],
-        'targetAlignedPixels': True,
-        'resampleAlg': resample_method,
-        'dstNodata': -999
-    }
-
-    dem1_aligned = gdal.Warp('', dem1_path, **warp_options)
-    dem2_aligned = gdal.Warp('', dem2_path, **warp_options)
-
+    # Get aligned arrays from the stats dictionary
+    arr1 = stats['aligned_dem1'].GetRasterBand(1).ReadAsArray()
+    arr2 = stats['aligned_dem2'].GetRasterBand(1).ReadAsArray()
+    
     # Calculate difference
-    arr1 = dem1_aligned.GetRasterBand(1).ReadAsArray()
-    arr2 = dem2_aligned.GetRasterBand(1).ReadAsArray()
     diff = np.full_like(arr1, -999, dtype=np.float32)
     valid_mask = (arr1 != -999) & (arr2 != -999)
     diff[valid_mask] = arr2[valid_mask] - arr1[valid_mask]
 
-    # Create output
-    driver = gdal.GetDriverByName('GTiff')
-    out_ds = driver.Create(
-        output_path,
-        diff.shape[1],
-        diff.shape[0],
-        1,
-        gdal.GDT_Float32,
-        options=['COMPRESS=LZW', 'TILED=YES']
+    # Prepare data for writeTiff
+    x = np.linspace(
+        stats['overlap_bounds'][0] + stats['resolution'][0]/2,
+        stats['overlap_bounds'][2] - stats['resolution'][0]/2,
+        diff.shape[1]
+    )
+    y = np.linspace(
+        stats['overlap_bounds'][3] - stats['resolution'][1]/2,
+        stats['overlap_bounds'][1] + stats['resolution'][1]/2,
+        diff.shape[0]
     )
     
-    # Set geotransform based on overlap bounds
-    new_transform = (
-        stats['overlap_bounds'][0],  # top left x
-        stats['resolution'][0],     # w-e pixel resolution
-        0,                          # rotation (0 = north up)
-        stats['overlap_bounds'][3],  # top left y
-        0,                          # rotation (0 = north up)
-        -stats['resolution'][1]     # n-s pixel resolution (negative)
-    )
-    
-    out_ds.SetGeoTransform(new_transform)
-    out_ds.SetProjection(dem1_aligned.GetProjection())
-    out_ds.GetRasterBand(1).WriteArray(diff)
-    out_ds.GetRasterBand(1).SetNoDataValue(-999)
-    out_ds.FlushCache()
-    out_ds = None
+    # Get projection from one of the aligned DEMs
+    srs = osr.SpatialReference()
+    srs.ImportFromWkt(stats['aligned_dem1'].GetProjection())
+    epsg = int(srs.GetAttrValue('AUTHORITY', 1))
 
+    self.writeTiff(
+        diff.flatten(),
+        np.tile(x, diff.shape[0]),
+        np.repeat(y, diff.shape[1]),
+        stats['resolution'][0],
+        filename=output_path,
+        in_epsg=epsg,
+        out_epsg=epsg,
+        reproject=False
+    )
+
+    # Clean up
+    stats['aligned_dem1'] = stats['aligned_dem2'] = None
+    
     print(f"Created difference DEM in overlapping area: {output_path}")
