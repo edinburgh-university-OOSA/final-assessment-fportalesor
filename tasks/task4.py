@@ -1,8 +1,6 @@
 from _bootstrap import *
 import argparse
-import glob
 import os
-from src.sectionProcessing import LVISSectionProcessor
 from src.handleTiff import tiffHandle
 from src.plotting import plotLVIS
 
@@ -24,12 +22,16 @@ if __name__ == "__main__":
     filename = '/geos/netdata/oosa/assignment/lvis/2009/ILVIS1B_AQ2009_1020_R1408_058456.h5'
     tiffHandler = tiffHandle(filename)
     
+    # Define precise bbox for Pine Island Glacier (in EPSG:3031)
+    BBOX = (-1.620e6, -0.300e6, -1.570e6, -0.230e6)
+
     # Create combined mosaics and apply gap-filler algorithm
     print(f"\nProcessing year: {args.year}")
     success = tiffHandler.create_combined_mosaic(year=args.year,
                                                 create_filled=True,
                                                 max_distance=args.max_distance,
-                                                smoothing=args.smoothing)
+                                                smoothing=args.smoothing,
+                                                bbox=BBOX)
         
     if success:
         print(f"Successfully processed year {args.year}")
@@ -39,6 +41,6 @@ if __name__ == "__main__":
 
     # Plot filled mosaics
     tiff_path = os.path.join('processed_data', f'filled_mosaic_{args.year}.tif')
-    print(tiff_path)
+
     plotter = plotLVIS(filename)
     plotter.plotDEM(tiff_path)
