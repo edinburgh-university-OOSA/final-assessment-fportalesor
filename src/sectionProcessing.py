@@ -18,6 +18,13 @@ class SectionProcessor:
         self.clean_sections = clean_sections,
         self.bbox = bbox
 
+    def calculate_section_dimensions(self, bounds):
+        """Calculate dimensions for each section"""
+        x_min, y_min, x_max, y_max = bounds
+        section_width = (x_max - x_min) / self.section_factor
+        section_height = (y_max - y_min) / self.section_factor
+        return x_min, y_min, section_width, section_height
+
     @staticmethod
     def convert_longitude(lon):
         """Convert longitude from 0–360 range to -180 to 180 range."""
@@ -45,62 +52,22 @@ class SectionProcessor:
                    s_minlat > t_maxlat)
     
     def create_output_directory(self):
-        """Create output directory based on input filename"""
+        """Create output directory based on input filename, placing it in processed_data folder"""
         path_parts = self.filename.split('/')
         year = path_parts[-2] if len(path_parts) > 1 else "unknown_year"
         self.base_name = os.path.splitext(os.path.basename(self.filename))[0]
-        self.output_dir = f"{self.base_name}_{year}"
+    
+        # Create path with processed_data as parent directory
+        self.output_dir = os.path.join("processed_data", f"{self.base_name}_{year}")
+    
+        # Create directory (including any necessary parent directories)
         os.makedirs(self.output_dir, exist_ok=True)
+    
         return self.output_dir
 
     def get_full_bounds(self):
         """Get bounds of the full dataset"""
         return lvisGround(self.filename, onlyBounds=True)
-
-    def calculate_section_dimensions(self, bounds):
-        """Calculate dimensions for each section"""
-        x_min, y_min, x_max, y_max = bounds
-        section_width = (x_max - x_min) / self.section_factor
-        section_height = (y_max - y_min) / self.section_factor
-        return x_min, y_min, section_width, section_height
-
-    def create_mosaic(self, final_output, clean_sections=True):
-        """Combine all section files into a single mosaic
-    
-        Args:
-            final_output: Path for the output mosaic file
-            clean_sections: If True, deletes section files after successful mosaic (default: False)
-        
-        Returns:
-            bool: True if mosaic was created successfully
-        """
-        if not self.section_files:
-            print("No section files found to mosaic")
-            return False
-            
-        print(f"\nCreating mosaic from {len(self.section_files)} files...")
-        cmd = [
-            'gdal_merge.py',
-            '-o', final_output,
-            '-of', 'GTiff',
-            '-n', '-999',
-            '-a_nodata', '-999',
-            '-init', '-999',
-            '-co', 'COMPRESS=LZW',
-            '-co', 'BIGTIFF=YES'
-        ] + self.section_files
-        
-        try:
-            subprocess.run(cmd, check=True)
-            print(f"Successfully created mosaic: {final_output}")
-
-            if clean_sections:
-                self._cleanup_section_files()
-
-            return True
-        except subprocess.CalledProcessError as e:
-            print(f"Error creating mosaic: {e}")
-            return False
 
     def _cleanup_section_files(self):
         """Internal method to safely remove section files"""
@@ -168,7 +135,7 @@ class LVISSectionProcessor(SectionProcessor):
             print(f"Error processing section {section_num:04d}: {str(e)}")
             return False
 
-    def process_all_sections(self):
+    def process_all_sections(self, clean_sections=True):
         """Process all sections in the dataset"""
         self.create_output_directory()
         full_bounds = self.get_full_bounds()
@@ -199,11 +166,14 @@ class LVISSectionProcessor(SectionProcessor):
         
         if successful > 0:
             final_output = os.path.join(self.output_dir, f"{self.base_name}_mosaic.tif")
-            self.create_mosaic(final_output, clean_sections=self.clean_sections)
+            tiff_handler = tiffHandle(self.filename)
+            tiff_handler.create_mosaic(self.section_files, final_output)
+
+            if clean_sections:
+                self._cleanup_section_files()
         
         self.save_memory_stats()
         
         print(f"\nProcessing complete. Successfully processed {successful}/{total_sections} sections")
         return successful
-
 
