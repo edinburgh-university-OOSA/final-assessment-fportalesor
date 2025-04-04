@@ -9,6 +9,9 @@ from pyproj import Transformer # package for reprojecting data
 from osgeo import gdal             # package for handling geotiff data
 from osgeo import osr              # package for handling projection information
 import numpy as np
+import glob
+import os
+import subprocess
 from processLVIS import lvisGround
 
 #######################################################
@@ -128,3 +131,350 @@ class tiffHandle(lvisGround):
     self.pixelHeight=transform_ds[5]   # resolution in y direction
     # read data. Returns as a 2D numpy array
     self.data=ds.GetRasterBand(1).ReadAsArray(0,0,self.nX,self.nY)
+    self.ds = ds
+
+    return self
+
+  def create_mosaic(self, section_files, final_output):
+    '''
+    Fast mosaic creation with memory limit
+    
+    Args:
+        section_files (list): List of input TIFF file paths
+        final_output (str): Output file path for mosaic
+        
+    Returns:
+        bool: True if successful, False if failed
+    '''
+    try:
+        if not section_files:
+            print("No section files found to mosaic")
+            return False
+            
+        print(f"\nCreating mosaic from {len(section_files)} files...")
+        
+        # Create temporary VRT file
+        vrt_file = "temp_mosaic.vrt"
+        
+        # Build VRT first (very fast operation)
+        cmd_vrt = [
+            'gdalbuildvrt',
+            '-hidenodata',
+            '-vrtnodata', '-999',  # Using standard GDAL NoData value
+            '-resolution', 'highest',
+            '-r', 'nearest',
+            vrt_file
+        ] + section_files
+        
+        # Convert VRT to final TIFF with memory limits
+        cmd_translate = [
+            'gdal_translate',
+            '-of', 'GTiff',
+            '-co', 'COMPRESS=LZW',
+            '-co', 'BIGTIFF=YES',
+            '-co', 'TILED=YES',
+            '-co', 'NUM_THREADS=ALL_CPUS',
+            '-a_nodata', '-999',
+            '--config', 'GDAL_CACHEMAX', '512',
+            '--config', 'GDAL_DISABLE_READDIR_ON_OPEN', 'TRUE',
+            '--config', 'GDAL_NUM_THREADS', 'ALL_CPUS',
+            vrt_file,
+            final_output
+        ]
+        
+        # Run both commands with error checking
+        subprocess.run(cmd_vrt, check=True)
+        subprocess.run(cmd_translate, check=True)
+        
+        # Clean up temporary VRT
+        try:
+            os.remove(vrt_file)
+        except OSError:
+            pass
+        
+        print(f"Successfully created mosaic: {final_output}")
+        return True
+        
+    except subprocess.CalledProcessError as e:
+        print(f"Error creating mosaic: {e}")
+        try:
+            os.remove(final_output)
+        except OSError:
+            pass
+        return False
+    except Exception as e:
+        print(f"Unexpected error creating mosaic: {e}")
+        return False
+
+  def fill_gaps(self, input_path, output_path, max_distance=45, smoothing=3):
+    '''
+    Fill gaps using GDAL's FillNodata algorithm
+    
+    Args:
+        input_path (str): Input TIFF file path
+        output_path (str): Output TIFF file path
+        max_distance (int): Maximum search distance (pixels)
+        smoothing (int): Smoothing iterations (0 for none)
+        
+    Returns:
+        bool: True if successful, False if failed
+    '''
+    try:
+        # 1. Open input file
+        src_ds = gdal.Open(input_path)
+        if src_ds is None:
+            raise ValueError(f"Could not open {input_path}")
+
+        # 2. Create output file
+        driver = gdal.GetDriverByName('GTiff')
+        dst_ds = driver.CreateCopy(
+            output_path, 
+            src_ds, 
+            0,  # No special creation flags
+            ['COMPRESS=LZW', 'BIGTIFF=YES', 'TILED=YES']
+        )
+
+        # 3. Fill gaps in each band
+        for band_num in range(1, src_ds.RasterCount + 1):
+            band = dst_ds.GetRasterBand(band_num)
+            gdal.FillNodata(
+                targetBand=band,
+                maskBand=None,  # Optional mask band
+                maxSearchDist=max_distance,
+                smoothingIterations=smoothing
+            )
+            band.FlushCache()  # Ensure writes are saved
+
+        # 4. Cleanup
+        dst_ds = None  # Close file (required to save changes)
+        src_ds = None
+        return True
+
+    except Exception as e:
+        print(f"Gap filling failed: {str(e)}")
+        # Cleanup partially created files
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        return False
+
+  def create_combined_mosaic(self, year=2015, max_distance=None, smoothing=None, create_filled=False):
+    '''
+    Create a combined mosaic from all folders matching the year pattern
+    
+    Args:
+        year (int): Year to search for in folder names
+        max_distance (int): Maximum search distance for gap filling (pixels)
+        smoothing (int): Smoothing iterations for gap filling
+        create_filled (bool): Whether to create gap-filled version
+        
+    Returns:
+        bool: True if successful, False if failed
+    '''
+    # Step 1: Find all folders ending with "_year"
+    folders = glob.glob(f"processed_data/*_{year}")
+    
+    if not folders:
+        print(f"No folders ending with '_{year}' found.")
+        return False
+    
+    # Step 2: Collect all tif files
+    tif_files = []
+    
+    for folder in folders:
+        # Look for files ending with "_mosaic.tif" in each folder
+        mosaic_files = glob.glob(os.path.join(folder, "*_mosaic.tif"))
+        tif_files.extend(mosaic_files)
+    
+    if not tif_files:
+        print("No '_mosaic.tif' files found in the folders.")
+        return False
+    
+    # Create output paths within processed_data
+    output_filename = os.path.join("processed_data", f"combined_mosaic_{year}.tif")
+    filled_filename = os.path.join("processed_data", f"filled_mosaic_{year}.tif")
+    
+    # Step 3: Use create_mosaic function to combine them
+    success = self.create_mosaic(tif_files, output_filename)
+    
+    if not success:
+        return False
+    
+    if create_filled:
+        # Apply defaults if parameters not specified
+        actual_max_dist = max_distance if max_distance is not None else 45
+        actual_smoothing = smoothing if smoothing is not None else 3
+        
+        print(f"\nFilling gaps (distance: {actual_max_dist}, smoothing: {actual_smoothing})...")
+        return self.fill_gaps(output_filename, filled_filename, 
+                            actual_max_dist, actual_smoothing)
+    
+    else:
+        print(f"Successfully created mosaic: {output_filename}")
+        return True
+    
+  def calculate_volume_change(self, dem1_path, dem2_path, resample_method='bilinear'):
+    """
+    Calculate volume change between two DEMs in their overlapping region
+    
+    Args:
+        dem1_path: Path to first DEM
+        dem2_path: Path to second DEM
+        resample_method: Resampling method ('nearest', 'bilinear', 'cubic')
+        
+    Returns:
+        tuple: (volume_change, stats) where stats contains:
+               {'min', 'max', 'mean', 'std', 'area', 'pixel_count'}
+    """
+    # Open both datasets
+    ds1 = gdal.Open(dem1_path)
+    ds2 = gdal.Open(dem2_path)
+    
+    if not ds1 or not ds2:
+        raise ValueError("Could not open one or both DEM files")
+
+    # Get geographic information
+    def get_geo_info(ds):
+        transform = ds.GetGeoTransform()
+        x_size = ds.RasterXSize
+        y_size = ds.RasterYSize
+        minx = transform[0]
+        maxy = transform[3]
+        maxx = minx + transform[1] * x_size
+        miny = maxy + transform[5] * y_size
+        return {
+            'transform': transform,
+            'projection': ds.GetProjection(),
+            'bounds': (minx, miny, maxx, maxy),
+            'size': (x_size, y_size)
+        }
+
+    info1 = get_geo_info(ds1)
+    info2 = get_geo_info(ds2)
+
+    # Check if projections match
+    if info1['projection'] != info2['projection']:
+        raise ValueError("DEMs must have the same projection")
+
+    # Calculate overlapping area
+    overlap_bounds = (
+        max(info1['bounds'][0], info2['bounds'][0]),  # minx
+        max(info1['bounds'][1], info2['bounds'][1]),  # miny
+        min(info1['bounds'][2], info2['bounds'][2]),  # maxx
+        min(info1['bounds'][3], info2['bounds'][3])   # maxy
+    )
+
+    # Check if there is actual overlap
+    if overlap_bounds[0] >= overlap_bounds[2] or overlap_bounds[1] >= overlap_bounds[3]:
+        raise ValueError("DEMs do not have any overlapping area")
+
+    # Determine output resolution (use the finer resolution)
+    res_x = min(abs(info1['transform'][1]), abs(info2['transform'][1]))
+    res_y = min(abs(info1['transform'][5]), abs(info2['transform'][5]))
+
+    # Warp both DEMs to the same grid
+    warp_options = {
+        'format': 'MEM',
+        'outputBounds': overlap_bounds,
+        'xRes': res_x,
+        'yRes': res_y,
+        'targetAlignedPixels': True,
+        'resampleAlg': resample_method,
+        'dstNodata': -999
+    }
+
+    dem1_aligned = gdal.Warp('', ds1, **warp_options)
+    dem2_aligned = gdal.Warp('', ds2, **warp_options)
+
+    # Read the aligned arrays
+    arr1 = dem1_aligned.GetRasterBand(1).ReadAsArray()
+    arr2 = dem2_aligned.GetRasterBand(1).ReadAsArray()
+
+    # Calculate differences on valid pixels
+    valid_mask = (arr1 != -999) & (arr2 != -999)
+    diff = np.full_like(arr1, np.nan)
+    diff[valid_mask] = arr2[valid_mask] - arr1[valid_mask]
+
+    # Calculate statistics
+    pixel_area = res_x * res_y
+    volume_change = np.nansum(diff) * pixel_area
+
+    stats = {
+        'min': np.nanmin(diff),
+        'max': np.nanmax(diff),
+        'mean': np.nanmean(diff),
+        'std': np.nanstd(diff),
+        'area': np.sum(valid_mask) * pixel_area,
+        'pixel_count': np.sum(valid_mask),
+        'overlap_bounds': overlap_bounds,
+        'resolution': (res_x, res_y)
+    }
+
+    # Clean up
+    del dem1_aligned, dem2_aligned
+    ds1 = ds2 = None
+
+    return volume_change, stats
+    
+  def create_difference_dem(self, dem1_path, dem2_path, output_path, resample_method='bilinear'):
+    """
+    Create a difference DEM from two input DEMs in their overlapping area
+    
+    Args:
+        dem1_path: Path to first DEM
+        dem2_path: Path to second DEM
+        output_path: Path for output difference DEM
+        resample_method: Resampling method
+    """
+    # First calculate volume change to get alignment parameters
+    _, stats = self.calculate_volume_change(dem1_path, dem2_path, resample_method)
+    
+    # Warp both DEMs to the same grid
+    warp_options = {
+        'format': 'MEM',
+        'outputBounds': stats['overlap_bounds'],
+        'xRes': stats['resolution'][0],
+        'yRes': stats['resolution'][1],
+        'targetAlignedPixels': True,
+        'resampleAlg': resample_method,
+        'dstNodata': -999
+    }
+
+    dem1_aligned = gdal.Warp('', dem1_path, **warp_options)
+    dem2_aligned = gdal.Warp('', dem2_path, **warp_options)
+
+    # Calculate difference
+    arr1 = dem1_aligned.GetRasterBand(1).ReadAsArray()
+    arr2 = dem2_aligned.GetRasterBand(1).ReadAsArray()
+    diff = np.full_like(arr1, -999, dtype=np.float32)
+    valid_mask = (arr1 != -999) & (arr2 != -999)
+    diff[valid_mask] = arr2[valid_mask] - arr1[valid_mask]
+
+    # Create output
+    driver = gdal.GetDriverByName('GTiff')
+    out_ds = driver.Create(
+        output_path,
+        diff.shape[1],
+        diff.shape[0],
+        1,
+        gdal.GDT_Float32,
+        options=['COMPRESS=LZW', 'TILED=YES']
+    )
+    
+    # Set geotransform based on overlap bounds
+    new_transform = (
+        stats['overlap_bounds'][0],  # top left x
+        stats['resolution'][0],     # w-e pixel resolution
+        0,                          # rotation (0 = north up)
+        stats['overlap_bounds'][3],  # top left y
+        0,                          # rotation (0 = north up)
+        -stats['resolution'][1]     # n-s pixel resolution (negative)
+    )
+    
+    out_ds.SetGeoTransform(new_transform)
+    out_ds.SetProjection(dem1_aligned.GetProjection())
+    out_ds.GetRasterBand(1).WriteArray(diff)
+    out_ds.GetRasterBand(1).SetNoDataValue(-999)
+    out_ds.FlushCache()
+    out_ds = None
+
+    print(f"Created difference DEM in overlapping area: {output_path}")
