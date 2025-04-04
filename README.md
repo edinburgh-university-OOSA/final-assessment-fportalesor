@@ -1,5 +1,5 @@
 # OOSA Assignment 2025 (Exam No. B273049)
-This repository contains Python tools for processing and analyzing elevation data from NASA's Land, Vegetation, and Ice Sensor (LVIS), specifically focusing on Level 1B datasets from 2009 and 2015 over Pine Island Glacier in Antarctica. 
+This repository contains Python tools for processing and analysing elevation data from NASA's Land, Vegetation, and Ice Sensor (LVIS), specifically focusing on Level 1B datasets from 2009 and 2015 over Pine Island Glacier in Antarctica. 
 
 The toolkit enables reading raw LVIS waveform data, processing it into raster digital elevation models (DEMs), and generating derived graphical products.
 
@@ -33,7 +33,7 @@ python task1.py -f [FILEPATH] -i 15 # Directly plots waveform 15
 
 #### Example output
 
-![Example LVIS Waveform](./plots/waveform_15.png)
+<img src="./plots/waveform_15.png" alt="Example LVIS Waveform" width="70%"/>
 
 
 ## Task 2
@@ -61,8 +61,36 @@ python task3.py -y 2015 -s 20 -r 100
 #### Example outputs
 
 - 2009
-![Combined Mosaic 2009](./plots/DEM_combined_mosaic_2009.png)
+
+<img src="./plots/DEM_combined_mosaic_2009.png" alt="Combined Mosaic 2009" width="70%"/>
+
 
 - 2015
-![Combined Mosaic 2015](./plots/DEM_combined_mosaic_2015.png)
 
+<img src="./plots/DEM_combined_mosaic_2015.png" alt="Combined Mosaic 2015" width="70%"/>
+
+## Task 4
+
+#### Example command for 2009 data
+
+```
+python task4.py -y 2009
+```
+
+#### Gap filling with different parameters
+
+```
+python task4.py -y 2009 -md 30 -s 5
+```
+
+For 2015 year data change the value in -y is needed
+
+#### Example outputs
+
+- 2009
+
+<img src="./plots/DEM_filled_mosaic_2009.png" alt="Filled Mosaic 2009" width="70%"/>
+
+- 2015
+
+<img src="./plots/DEM_filled_mosaic_2015.png" alt="Filled Mosaic 2015" width="70%"/>
